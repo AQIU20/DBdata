@@ -20,61 +20,80 @@ public class Tokenizer {
             if (token.isEmpty()) {
                 continue;
             }
-            // If a token begins with a single quote, handle potential string literal
+            // 如果 token 以单引号开始，处理字符串字面量
             if (token.startsWith("'")) {
                 stringToken = new StringBuilder();
-                // Remove leading quote
-                token = token.substring(1);
-                // If token ends with a quote too (and isn't just that quote), then it's a one-word string literal
+                token = token.substring(1); // 去掉前导引号
                 if (token.endsWith("'")) {
-                    // Remove trailing quote
-                    token = token.substring(0, token.length() - 1);
+                    token = token.substring(0, token.length() - 1); // 去掉尾部引号
                     stringToken.append(token);
-                    tokens.add(stringToken.toString());
+                    // 保留原始大小写，并加上单引号以便后续处理
+                    tokens.add("'" + stringToken.toString() + "'");
                     stringToken = null;
                 } else {
-                    // Start combining tokens until we find the closing quote
                     stringToken.append(token);
-                    // Append a space if we will add more parts of the string literal
+                    // 继续合并后续 token，直到遇到结束引号
                     while (i + 1 < parts.length) {
                         i++;
                         String nextToken = parts[i];
-                        // If this next token contains the closing quote at end
                         if (nextToken.endsWith("'")) {
-                            // Include the intermediate space and the token without the closing quote
                             stringToken.append(" ").append(nextToken.substring(0, nextToken.length() - 1));
-                            tokens.add(stringToken.toString());
+                            tokens.add("'" + stringToken.toString() + "'");
                             stringToken = null;
                             break;
                         } else {
-                            // Append the whole token with space and continue
                             stringToken.append(" ").append(nextToken);
                         }
                     }
-                    // If stringToken is not null here, it means closing quote was missing.
-                    // We will still add whatever we gathered as one token (it will be an incomplete string literal).
-                    if (stringToken != null) {
-                        tokens.add(stringToken.toString());
+                    if (stringToken != null) { // 如果结束引号缺失，也将其加入
+                        tokens.add("'" + stringToken.toString() + "'");
                         stringToken = null;
                     }
                 }
             } else {
-                // Not a string literal start, so just add token if not in middle of string assembly
                 tokens.add(token);
             }
         }
 
-        // 合并连续的 "=" token：如果相邻两个 token 均为 "=" 则合并为 "=="
+        // 合并连续的比较操作符
         List<String> combinedTokens = new ArrayList<>();
         for (int i = 0; i < tokens.size(); i++) {
             String curr = tokens.get(i);
-            if (curr.equals("=") && (i + 1 < tokens.size()) && tokens.get(i + 1).equals("=")) {
-                combinedTokens.add("==");
-                i++; // 跳过下一个 token
-            } else {
-                combinedTokens.add(curr);
+            if (i + 1 < tokens.size()) {
+                String next = tokens.get(i + 1);
+                if (curr.equals("=") && next.equals("=")) {
+                    combinedTokens.add("==");
+                    i++;
+                    continue;
+                }
+                if (curr.equals(">") && next.equals("=")) {
+                    combinedTokens.add(">=");
+                    i++;
+                    continue;
+                }
+                if (curr.equals("<") && next.equals("=")) {
+                    combinedTokens.add("<=");
+                    i++;
+                    continue;
+                }
+                if (curr.equals("!") && next.equals("=")) {
+                    combinedTokens.add("!=");
+                    i++;
+                    continue;
+                }
             }
+            combinedTokens.add(curr);
         }
-        return combinedTokens;
+
+        // 去除每个 token 尾部的分号
+        List<String> finalTokens = new ArrayList<>();
+        for (String t : combinedTokens) {
+            if (t.endsWith(";")) {
+                t = t.substring(0, t.length() - 1);
+            }
+            finalTokens.add(t);
+        }
+
+        return finalTokens;
     }
 }

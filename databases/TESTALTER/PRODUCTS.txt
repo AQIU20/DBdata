@@ -1,0 +1,2 @@
+id, NAME, CATEGORY
+1, Laptop, 

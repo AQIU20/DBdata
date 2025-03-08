@@ -28,6 +28,11 @@ public class Parser {
                 return parseUpdate(tokens);
             case "DELETE":
                 return parseDelete(tokens);
+            case "JOIN":
+                return parseJoin(tokens);
+            case "ALTER":
+                return parseAlter(tokens);
+
             default:
                 throw new Exception(ErrorHandler.syntaxError());
         }
@@ -231,18 +236,16 @@ public class Parser {
     }
 
     private SelectStatement parseSelect(List<String> tokens) throws Exception {
-        // Example tokens: ["SELECT", "*", "FROM", "tableName", "WHERE", "COL", "==", "'Simon'"]
+        // Example tokens: ["SELECT", "*", "FROM", "tableName", "WHERE", ... condition tokens ...]
         if (tokens.size() < 4) {
             throw new Exception(ErrorHandler.syntaxError());
         }
         List<String> selectColumns = new ArrayList<>();
         int index = 1;
-        // If first select field is "*"
         if (tokens.get(index).equals("*")) {
-            selectColumns = null; // null or empty indicates all columns
+            selectColumns = null; // null 表示所有列
             index++;
         } else {
-            // parse column list until we see "FROM"
             while (index < tokens.size() && !tokens.get(index).equals("FROM")) {
                 if (tokens.get(index).equals(",")) {
                     index++;
@@ -260,30 +263,16 @@ public class Parser {
             throw new Exception(ErrorHandler.syntaxError());
         }
         String tableName = tokens.get(index++);
-        String whereColumn = null;
-        String whereValue = null;
-        if (index < tokens.size()) {
-            // If there's a WHERE clause
-            if (!tokens.get(index).equals("WHERE")) {
-                throw new Exception(ErrorHandler.syntaxError());
-            }
-            if (index + 3 >= tokens.size()) {
-                throw new Exception(ErrorHandler.syntaxError());
-            }
-            whereColumn = tokens.get(index + 1);
-            String op = tokens.get(index + 2);
-            // 允许 = 或 ==
-            if (!op.equals("=") && !op.equals("==")) {
-                throw new Exception(ErrorHandler.syntaxError());
-            }
-            whereValue = tokens.get(index + 3);
-            // 如果 whereValue 有引号，通常在 Tokenizer 已去除，这里假设已去除
+        Condition condition = null;
+        if (index < tokens.size() && tokens.get(index).equals("WHERE")) {
+            // 调用 parseCondition 解析 WHERE 子句，从 index+1 到 tokens.size()
+            condition = parseCondition(tokens, index + 1, tokens.size());
         }
-        return new SelectStatement(tableName, selectColumns, whereColumn, whereValue);
+        return new SelectStatement(tableName, selectColumns, condition);
     }
 
     private UpdateStatement parseUpdate(List<String> tokens) throws Exception {
-        // Example tokens: ["UPDATE","tableName","SET","COL1","==","VAL1",",","COL2","=","VAL2","WHERE","COLX","==","VALX"]
+        // Example tokens: ["UPDATE", "tableName", "SET", ... assignments ... "WHERE", ... condition tokens ...]
         if (tokens.size() < 5) {
             throw new Exception(ErrorHandler.syntaxError());
         }
@@ -291,22 +280,15 @@ public class Parser {
         if (!tokens.get(2).equals("SET")) {
             throw new Exception(ErrorHandler.syntaxError());
         }
-        // Parse assignments
         Map<String, String> assignments = new HashMap<>();
         int index = 3;
         while (index < tokens.size() && !tokens.get(index).equals("WHERE")) {
-            // expecting column name, "==" or "=", value sequence, possibly multiple separated by comma
             String colName = tokens.get(index);
             if (colName.equals(",")) {
                 index++;
                 continue;
             }
-            if (index + 1 >= tokens.size()) {
-                throw new Exception(ErrorHandler.syntaxError());
-            }
-            String op = tokens.get(index + 1);
-            // 允许 = 或 ==
-            if (!op.equals("=") && !op.equals("==")) {
+            if (index + 1 >= tokens.size() || (!tokens.get(index + 1).equals("=") && !tokens.get(index + 1).equals("=="))) {
                 throw new Exception(ErrorHandler.syntaxError());
             }
             if (index + 2 >= tokens.size()) {
@@ -316,29 +298,21 @@ public class Parser {
             assignments.put(colName, value);
             index += 3;
         }
-        String whereColumn = null;
-        String whereValue = null;
+        Condition condition = null;
         if (index < tokens.size()) {
-            // parse WHERE clause
-            if (!tokens.get(index).equals("WHERE") || index + 3 >= tokens.size()) {
+            if (!tokens.get(index).equals("WHERE")) {
                 throw new Exception(ErrorHandler.syntaxError());
             }
-            whereColumn = tokens.get(index + 1);
-            String op = tokens.get(index + 2);
-            // 允许 = 或 ==
-            if (!op.equals("=") && !op.equals("==")) {
-                throw new Exception(ErrorHandler.syntaxError());
-            }
-            whereValue = tokens.get(index + 3);
+            condition = parseCondition(tokens, index + 1, tokens.size());
         }
         if (assignments.isEmpty()) {
             throw new Exception(ErrorHandler.syntaxError());
         }
-        return new UpdateStatement(tableName, assignments, whereColumn, whereValue);
+        return new UpdateStatement(tableName, assignments, condition);
     }
 
     private DeleteStatement parseDelete(List<String> tokens) throws Exception {
-        // Example tokens: ["DELETE","FROM","tableName","WHERE","COL","==","VAL"]
+        // Example tokens: ["DELETE", "FROM", "tableName", "WHERE", ... condition tokens ...]
         if (tokens.size() < 3) {
             throw new Exception(ErrorHandler.syntaxError());
         }
@@ -351,20 +325,99 @@ public class Parser {
             throw new Exception(ErrorHandler.syntaxError());
         }
         String tableName = tokens.get(index++);
-        String whereColumn = null;
-        String whereValue = null;
+        Condition condition = null;
         if (index < tokens.size()) {
-            if (!tokens.get(index).equals("WHERE") || index + 3 >= tokens.size()) {
+            if (!tokens.get(index).equals("WHERE")) {
                 throw new Exception(ErrorHandler.syntaxError());
             }
-            whereColumn = tokens.get(index + 1);
-            String op = tokens.get(index + 2);
-            // 允许 = 或 ==
-            if (!op.equals("=") && !op.equals("==")) {
-                throw new Exception(ErrorHandler.syntaxError());
-            }
-            whereValue = tokens.get(index + 3);
+            condition = parseCondition(tokens, index + 1, tokens.size());
         }
-        return new DeleteStatement(tableName, whereColumn, whereValue);
+        return new DeleteStatement(tableName, condition);
     }
+    private Condition parseCondition(List<String> tokens, int start, int end) throws Exception {
+        // 如果条件整体被括号包围，则去除外层括号（前提是括号匹配）
+        if (tokens.get(start).equals("(") && tokens.get(end - 1).equals(")")) {
+            // 简单判断是否应去掉外围括号（这里假设括号匹配正确）
+            start++;
+            end--;
+        }
+        // 在顶层寻找布尔运算符（AND 或 OR），注意只在括号外查找
+        int level = 0;
+        int opIndex = -1;
+        String boolOp = null;
+        for (int i = start; i < end; i++) {
+            String t = tokens.get(i);
+            if (t.equals("(")) {
+                level++;
+            } else if (t.equals(")")) {
+                level--;
+            } else if (level == 0 && (t.equals("AND") || t.equals("OR"))) {
+                opIndex = i;
+                boolOp = t;
+                break;
+            }
+        }
+        if (opIndex != -1) {
+            // 分解为左、右条件
+            Condition left = parseCondition(tokens, start, opIndex);
+            Condition right = parseCondition(tokens, opIndex + 1, end);
+            return new CompoundCondition(left, boolOp, right);
+        } else {
+            // 期望为简单条件：应有 3 个 token: [AttributeName] <Comparator> [Value]
+            if (end - start != 3) {
+                throw new Exception(ErrorHandler.syntaxError());
+            }
+            String attribute = tokens.get(start);
+            String comparator = tokens.get(start + 1);
+            if (!isValidComparator(comparator)) {
+                throw new Exception(ErrorHandler.syntaxError());
+            }
+            String value = tokens.get(start + 2);
+            return new SimpleCondition(attribute, comparator, value);
+        }
+    }
+
+    private boolean isValidComparator(String op) {
+        return op.equals("=") || op.equals("==") || op.equals(">") || op.equals("<") ||
+                op.equals(">=") || op.equals("<=") || op.equals("!=") || op.equals("LIKE");
+    }
+
+    private JoinStatement parseJoin(List<String> tokens) throws Exception {
+        // Expected tokens: ["JOIN", table1, "AND", table2, "ON", attr1, "AND", attr2]
+        if (tokens.size() != 8) {
+            throw new Exception(ErrorHandler.syntaxError());
+        }
+        if (!tokens.get(2).equals("AND")) {
+            throw new Exception(ErrorHandler.syntaxError());
+        }
+        if (!tokens.get(4).equals("ON")) {
+            throw new Exception(ErrorHandler.syntaxError());
+        }
+        if (!tokens.get(6).equals("AND")) {
+            throw new Exception(ErrorHandler.syntaxError());
+        }
+        String table1 = tokens.get(1);
+        String table2 = tokens.get(3);
+        String attr1 = tokens.get(5);
+        String attr2 = tokens.get(7);
+        return new JoinStatement(table1, table2, attr1, attr2);
+    }
+
+    private AlterTableStatement parseAlter(List<String> tokens) throws Exception {
+        // Expected tokens: ["ALTER", "TABLE", tableName, alterationType, attributeName]
+        if (tokens.size() != 5) {
+            throw new Exception(ErrorHandler.syntaxError());
+        }
+        if (!tokens.get(1).equals("TABLE")) {
+            throw new Exception(ErrorHandler.syntaxError());
+        }
+        String tableName = tokens.get(2);
+        String alterationType = tokens.get(3);
+        if (!alterationType.equals("ADD") && !alterationType.equals("DROP")) {
+            throw new Exception(ErrorHandler.syntaxError());
+        }
+        String attributeName = tokens.get(4);
+        return new AlterTableStatement(tableName, alterationType, attributeName);
+    }
+
 }

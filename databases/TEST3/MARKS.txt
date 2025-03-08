@@ -1,3 +1,0 @@
-id, NAME , MARK , PASS 
-1, SIMON, 65, TRUE
-2, SIMON, 65, TRUE

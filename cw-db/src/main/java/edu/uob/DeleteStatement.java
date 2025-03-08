@@ -1,25 +1,19 @@
 package edu.uob;
 
-public class DeleteStatement implements edu.uob.SQLStatement {
-    private final String tableName;
-    private final String whereColumn;
-    private final String whereValue;
+public class DeleteStatement implements SQLStatement {
+    private String tableName;
+    private Condition condition; // 可为 null
 
-    public DeleteStatement(String tableName, String whereColumn, String whereValue) {
+    public DeleteStatement(String tableName, Condition condition) {
         this.tableName = tableName;
-        this.whereColumn = whereColumn;
-        this.whereValue = whereValue;
+        this.condition = condition;
     }
 
     public String getTableName() {
         return tableName;
     }
 
-    public String getWhereColumn() {
-        return whereColumn;
-    }
-
-    public String getWhereValue() {
-        return whereValue;
+    public Condition getCondition() {
+        return condition;
     }
 }

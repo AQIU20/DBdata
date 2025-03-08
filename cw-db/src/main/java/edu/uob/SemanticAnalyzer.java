@@ -146,17 +146,17 @@ public class SemanticAnalyzer {
         if (!StorageManager.tableExists(DatabaseManager.getCurrentDatabase(), tableName)) {
             throw new Exception(ErrorHandler.tableNotFound(tableName));
         }
-        // 读取表 schema
         List<ColumnDefinition> columns = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
         if (columns == null) {
             throw new Exception(ErrorHandler.tableNotFound(tableName));
         }
+
+        // 检查 SELECT 中的列
         List<String> selectColumns = stmt.getColumns();
         if (selectColumns != null) {
             for (String colName : selectColumns) {
                 boolean found = false;
                 for (ColumnDefinition colDef : columns) {
-                    // 使用 equalsIgnoreCase 进行比较
                     if (colDef.getName().equalsIgnoreCase(colName)) {
                         found = true;
                         break;
@@ -167,137 +167,180 @@ public class SemanticAnalyzer {
                 }
             }
         }
-        // 检查 where 子句中的列是否存在（也使用 equalsIgnoreCase）
-        if (stmt.getWhereColumn() != null) {
+
+        // 新的：检查 Condition
+        Condition cond = stmt.getCondition();
+        checkConditionColumns(cond, columns);
+        } else if (statement instanceof UpdateStatement) {
+        UpdateStatement stmt = (UpdateStatement) statement;
+        String tableName = stmt.getTableName();
+        if (DatabaseManager.getCurrentDatabase() == null) {
+            throw new Exception(ErrorHandler.noDatabaseSelected());
+        }
+        if (!StorageManager.tableExists(DatabaseManager.getCurrentDatabase(), tableName)) {
+            throw new Exception(ErrorHandler.tableNotFound(tableName));
+        }
+        // 读取表的 schema
+        List<ColumnDefinition> columns = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
+        if (columns == null) {
+            throw new Exception(ErrorHandler.tableNotFound(tableName));
+        }
+        // 构造一个用于快速查找的列名集合
+        Set<String> colNames = new HashSet<>();
+        for (ColumnDefinition col : columns) {
+            colNames.add(col.getName());
+        }
+        // 检查每个 assignment 的列是否存在
+        for (String colName : stmt.getAssignments().keySet()) {
+            if (!colNames.contains(colName)) {
+                throw new Exception(ErrorHandler.columnNotFound(colName));
+            }
+        }
+        // 检查条件中使用的列是否存在（使用辅助方法）
+        Condition cond = stmt.getCondition();
+        checkConditionColumns(cond, columns);
+
+        // 如果正在更新主键列，确保新值不会造成重复
+        int pkIndex = -1;
+        for (int i = 0; i < columns.size(); i++) {
+            if (columns.get(i).isPrimaryKey()) {
+                pkIndex = i;
+                break;
+            }
+        }
+        if (pkIndex != -1 && stmt.getAssignments().containsKey(columns.get(pkIndex).getName())) {
+            String newPkValue = stmt.getAssignments().get(columns.get(pkIndex).getName());
+            List<List<String>> records = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), tableName);
+            for (List<String> record : records) {
+                if (record.size() > pkIndex && record.get(pkIndex).equals(newPkValue)) {
+                    // 如果有 WHERE 条件，可能是同一行（可选处理），此处简化处理，直接报重复错误
+                    throw new Exception(ErrorHandler.duplicatePrimaryKeyValue(newPkValue));
+                }
+            }
+        }
+        // 检查各 assignment 的类型匹配
+        for (String colName : stmt.getAssignments().keySet()) {
+            for (ColumnDefinition col : columns) {
+                if (col.getName().equals(colName)) {
+                    if (col.getType().toUpperCase().startsWith("INT")) {
+                        String val = stmt.getAssignments().get(colName);
+                        try {
+                            Integer.parseInt(val);
+                        } catch (NumberFormatException e) {
+                            throw new Exception(ErrorHandler.typeMismatch(col.getName(), col.getType()));
+                        }
+                    }
+                }
+            }
+        }
+        }else if (statement instanceof DeleteStatement) {
+        DeleteStatement stmt = (DeleteStatement) statement;
+        String tableName = stmt.getTableName();
+        if (DatabaseManager.getCurrentDatabase() == null) {
+            throw new Exception(ErrorHandler.noDatabaseSelected());
+        }
+        if (!StorageManager.tableExists(DatabaseManager.getCurrentDatabase(), tableName)) {
+            throw new Exception(ErrorHandler.tableNotFound(tableName));
+        }
+        List<ColumnDefinition> columns = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
+        if (columns == null) {
+            throw new Exception(ErrorHandler.tableNotFound(tableName));
+        }
+        // 新的：检查 condition 中用到的列
+        Condition cond = stmt.getCondition();
+        checkConditionColumns(cond, columns);
+        }else if (statement instanceof JoinStatement) {
+            JoinStatement stmt = (JoinStatement) statement;
+            String table1 = stmt.getTable1();
+            String table2 = stmt.getTable2();
+            // 检查两个表是否存在
+            if (!StorageManager.tableExists(DatabaseManager.getCurrentDatabase(), table1)) {
+                throw new Exception(ErrorHandler.tableNotFound(table1));
+            }
+            if (!StorageManager.tableExists(DatabaseManager.getCurrentDatabase(), table2)) {
+                throw new Exception(ErrorHandler.tableNotFound(table2));
+            }
+            // 检查各自表中是否包含指定的属性
+            List<ColumnDefinition> schema1 = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), table1);
+            List<ColumnDefinition> schema2 = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), table2);
+            boolean foundAttr1 = false, foundAttr2 = false;
+            for (ColumnDefinition col : schema1) {
+                if (col.getName().equalsIgnoreCase(stmt.getAttribute1())) {
+                    foundAttr1 = true;
+                    break;
+                }
+            }
+            for (ColumnDefinition col : schema2) {
+                if (col.getName().equalsIgnoreCase(stmt.getAttribute2())) {
+                    foundAttr2 = true;
+                    break;
+                }
+            }
+            if (!foundAttr1) {
+                throw new Exception(ErrorHandler.columnNotFound(stmt.getAttribute1()));
+            }
+            if (!foundAttr2) {
+                throw new Exception(ErrorHandler.columnNotFound(stmt.getAttribute2()));
+            }
+        } else if (statement instanceof AlterTableStatement) {
+            AlterTableStatement stmt = (AlterTableStatement) statement;
+            String tableName = stmt.getTableName();
+            if (DatabaseManager.getCurrentDatabase() == null) {
+                throw new Exception(ErrorHandler.noDatabaseSelected());
+            }
+            if (!StorageManager.tableExists(DatabaseManager.getCurrentDatabase(), tableName)) {
+                throw new Exception(ErrorHandler.tableNotFound(tableName));
+            }
+            List<ColumnDefinition> columns = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
+            String attrName = stmt.getAttributeName();
+            if (stmt.getAlterationType().equals("ADD")) {
+                // 检查属性是否已存在
+                for (ColumnDefinition col : columns) {
+                    if (col.getName().equalsIgnoreCase(attrName)) {
+                        throw new Exception(ErrorHandler.duplicateColumnName(attrName));
+                    }
+                }
+            } else if (stmt.getAlterationType().equals("DROP")) {
+                // 检查属性是否存在
+                boolean found = false;
+                for (ColumnDefinition col : columns) {
+                    if (col.getName().equalsIgnoreCase(attrName)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw new Exception(ErrorHandler.columnNotFound(attrName));
+                }
+            }
+        }
+    }
+
+    private void checkConditionColumns(Condition cond, List<ColumnDefinition> columns) throws Exception {
+        if (cond == null) {
+            return; // 没有 WHERE 条件，直接返回
+        }
+        if (cond instanceof SimpleCondition) {
+            SimpleCondition sc = (SimpleCondition) cond;
+            String attr = sc.getAttribute();
+            // 检查 attr 是否在表的 schema 中
             boolean found = false;
-            for (ColumnDefinition colDef : columns) {
-                if (colDef.getName().equalsIgnoreCase(stmt.getWhereColumn())) {
+            for (ColumnDefinition col : columns) {
+                if (col.getName().equalsIgnoreCase(attr)) {
                     found = true;
                     break;
                 }
             }
             if (!found) {
-                throw new Exception(ErrorHandler.columnNotFound(stmt.getWhereColumn()));
+                throw new Exception(ErrorHandler.columnNotFound(attr));
             }
-        }
-
-            // Check where clause column exists
-            if (stmt.getWhereColumn() != null) {
-                boolean found = false;
-                for (ColumnDefinition colDef : columns) {
-                    if (colDef.getName().equals(stmt.getWhereColumn())) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    throw new Exception(ErrorHandler.columnNotFound(stmt.getWhereColumn()));
-                }
-            }
-        } else if (statement instanceof edu.uob.UpdateStatement) {
-            edu.uob.UpdateStatement stmt = (edu.uob.UpdateStatement) statement;
-            String tableName = stmt.getTableName();
-            if (DatabaseManager.getCurrentDatabase() == null) {
-                throw new Exception(ErrorHandler.noDatabaseSelected());
-            }
-            if (!edu.uob.StorageManager.tableExists(DatabaseManager.getCurrentDatabase(), tableName)) {
-                throw new Exception(ErrorHandler.tableNotFound(tableName));
-            }
-            // Check that all assignment columns exist and where column exists
-            List<ColumnDefinition> columns = edu.uob.StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
-            if (columns == null) {
-                throw new Exception(ErrorHandler.tableNotFound(tableName));
-            }
-            // Build set of column names
-            Set<String> colNames = new HashSet<>();
-            for (ColumnDefinition col : columns) {
-                colNames.add(col.getName());
-            }
-            for (String colName : stmt.getAssignments().keySet()) {
-                if (!colNames.contains(colName)) {
-                    throw new Exception(ErrorHandler.columnNotFound(colName));
-                }
-            }
-            if (stmt.getWhereColumn() != null && !colNames.contains(stmt.getWhereColumn())) {
-                throw new Exception(ErrorHandler.columnNotFound(stmt.getWhereColumn()));
-            }
-            // If updating a primary key column, ensure not creating duplicates
-            int pkIndex = -1;
-            for (int i = 0; i < columns.size(); i++) {
-                if (columns.get(i).isPrimaryKey()) {
-                    pkIndex = i;
-                    break;
-                }
-            }
-            if (pkIndex != -1 && stmt.getAssignments().containsKey(columns.get(pkIndex).getName())) {
-                // If PK is being updated, ensure new value isn't already present (except possibly in the same row)
-                String newPkValue = stmt.getAssignments().get(columns.get(pkIndex).getName());
-                List<List<String>> records = edu.uob.StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), tableName);
-                for (List<String> record : records) {
-                    // If where clause is specified, maybe skip rows not matching where?
-                    // But easier: semantic check just sees if any other row has the new PK.
-                    if (record.size() > pkIndex && record.get(pkIndex).equals(newPkValue)) {
-                        // If where specified and this record is the one to be updated, skip it:
-                        if (stmt.getWhereColumn() != null) {
-                            // find index of whereColumn in columns list
-                            int whereIndex = -1;
-                            for (int i = 0; i < columns.size(); i++) {
-                                if (columns.get(i).getName().equals(stmt.getWhereColumn())) {
-                                    whereIndex = i;
-                                    break;
-                                }
-                            }
-                            if (whereIndex != -1 && record.get(whereIndex).equals(stmt.getWhereValue())) {
-                                // This is the record that will be updated, skip checking itself
-                                continue;
-                            }
-                        }
-                        throw new Exception(ErrorHandler.duplicatePrimaryKeyValue(newPkValue));
-                    }
-                }
-            }
-            // Check type of assignments similar to insert
-            for (String colName : stmt.getAssignments().keySet()) {
-                // find col definition
-                for (ColumnDefinition col : columns) {
-                    if (col.getName().equals(colName)) {
-                        if (col.getType().toUpperCase().startsWith("INT")) {
-                            String val = stmt.getAssignments().get(colName);
-                            try {
-                                Integer.parseInt(val);
-                            } catch (NumberFormatException e) {
-                                throw new Exception(ErrorHandler.typeMismatch(col.getName(), col.getType()));
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (statement instanceof DeleteStatement) {
-            DeleteStatement stmt = (DeleteStatement) statement;
-            String tableName = stmt.getTableName();
-            if (DatabaseManager.getCurrentDatabase() == null) {
-                throw new Exception(ErrorHandler.noDatabaseSelected());
-            }
-            if (!edu.uob.StorageManager.tableExists(DatabaseManager.getCurrentDatabase(), tableName)) {
-                throw new Exception(ErrorHandler.tableNotFound(tableName));
-            }
-            // Check where column exists
-            List<ColumnDefinition> columns = edu.uob.StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
-            if (columns == null) {
-                throw new Exception(ErrorHandler.tableNotFound(tableName));
-            }
-            if (stmt.getWhereColumn() != null) {
-                boolean found = false;
-                for (ColumnDefinition col : columns) {
-                    if (col.getName().equals(stmt.getWhereColumn())) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    throw new Exception(ErrorHandler.columnNotFound(stmt.getWhereColumn()));
-                }
-            }
+        } else if (cond instanceof CompoundCondition) {
+            CompoundCondition cc = (CompoundCondition) cond;
+            // 递归检查左、右条件
+            checkConditionColumns(cc.getLeft(), columns);
+            checkConditionColumns(cc.getRight(), columns);
         }
     }
+
+
 }

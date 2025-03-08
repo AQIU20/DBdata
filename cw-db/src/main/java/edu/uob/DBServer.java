@@ -82,6 +82,10 @@ public class DBServer {
                 result = QueryExecutor.executeUpdate((UpdateStatement) statement);
             } else if (statement instanceof DeleteStatement) {
                 result = QueryExecutor.executeDelete((DeleteStatement) statement);
+            } else if (statement instanceof JoinStatement) {
+                result = QueryExecutor.executeJoin((JoinStatement) statement);
+            } else if (statement instanceof AlterTableStatement) {
+                result = QueryExecutor.executeAlter((AlterTableStatement) statement);
             } else {
                 result = ErrorHandler.syntaxError();
             }

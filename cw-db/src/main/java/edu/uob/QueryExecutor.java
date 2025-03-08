@@ -12,40 +12,16 @@ public class QueryExecutor {
     public static String executeSelect(SelectStatement stmt) {
         String tableName = stmt.getTableName();
         List<String> selectColumns = stmt.getColumns(); // null means all columns
-        String whereCol = stmt.getWhereColumn();
-        String whereVal = stmt.getWhereValue();
-
-        // 如果 whereVal 两侧有单引号，则去除它们
-        if (whereVal != null && whereVal.length() >= 2 &&
-                whereVal.startsWith("'") && whereVal.endsWith("'")) {
-            whereVal = whereVal.substring(1, whereVal.length() - 1);
-        }
-
+        Condition condition = stmt.getCondition();      // 新增：从 statement 中获取 Condition
 
         // 读取表的 schema 和记录
         List<ColumnDefinition> schema = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
         List<List<String>> records = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), tableName);
 
-        // 如果存在 WHERE 子句，先找出对应的列索引（使用 equalsIgnoreCase）
-        int whereIndex = -1;
-        if (whereCol != null) {
-            for (int i = 0; i < schema.size(); i++) {
-                if (schema.get(i).getName().equalsIgnoreCase(whereCol)) {
-                    whereIndex = i;
-                    break;
-                }
-            }
-        }
-
-        // 过滤记录：使用不区分大小写比较字符串
+        // 根据 condition 过滤记录
         List<List<String>> resultRecords = new ArrayList<>();
         for (List<String> record : records) {
-            if (whereIndex != -1) {
-                if (record.size() > whereIndex && record.get(whereIndex).equalsIgnoreCase(whereVal)) {
-                    resultRecords.add(record);
-                }
-            } else {
-                // 没有 WHERE 子句，包含所有记录
+            if (condition == null || evaluateCondition(condition, record, schema)) {
                 resultRecords.add(record);
             }
         }
@@ -106,6 +82,84 @@ public class QueryExecutor {
         return output.toString();
     }
 
+    /**
+     * Execute an UPDATE statement and return result message.
+     */
+    public static String executeUpdate(UpdateStatement stmt) {
+        String tableName = stmt.getTableName();
+        Condition condition = stmt.getCondition();      // 新增
+        Map<String, String> assignments = stmt.getAssignments();
+
+        // Read current records
+        List<ColumnDefinition> schema = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
+        List<List<String>> records = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), tableName);
+
+        // Build column index map
+        Map<String, Integer> colIndexMap = new java.util.HashMap<>();
+        for (int i = 0; i < schema.size(); i++) {
+            colIndexMap.put(schema.get(i).getName(), i);
+        }
+
+        int updateCount = 0;
+        for (List<String> record : records) {
+            // 只更新符合 condition 的记录
+            if (condition == null || evaluateCondition(condition, record, schema)) {
+                // 更新指定列
+                for (Map.Entry<String, String> assign : assignments.entrySet()) {
+                    String colName = assign.getKey();
+                    String newValue = assign.getValue();
+                    Integer idx = colIndexMap.get(colName);
+                    if (idx != null) {
+                        // 如果 record 长度不足则填充
+                        while (record.size() <= idx) {
+                            record.add("");
+                        }
+                        record.set(idx, newValue);
+                    }
+                }
+                updateCount++;
+            }
+        }
+
+        // 写回所有记录
+        boolean success = StorageManager.writeTableRecords(DatabaseManager.getCurrentDatabase(), tableName, schema, records);
+        if (!success) {
+            return ErrorHandler.generalError("Failed to update rows.");
+        }
+        return updateCount + " row(s) updated.";
+    }
+
+    /**
+     * Execute a DELETE statement and return result message.
+     */
+    public static String executeDelete(DeleteStatement stmt) {
+        String tableName = stmt.getTableName();
+        Condition condition = stmt.getCondition();      // 新增
+
+        // Read current records
+        List<ColumnDefinition> schema = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
+        List<List<String>> records = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), tableName);
+
+        // 遍历记录，如果符合 condition 则删除
+        Iterator<List<String>> iterator = records.iterator();
+        int deleteCount = 0;
+        while (iterator.hasNext()) {
+            List<String> record = iterator.next();
+            if (condition == null || evaluateCondition(condition, record, schema)) {
+                iterator.remove();
+                deleteCount++;
+            }
+        }
+
+        // 写回剩余记录
+        boolean success = StorageManager.writeTableRecords(DatabaseManager.getCurrentDatabase(), tableName, schema, records);
+        if (!success) {
+            return ErrorHandler.generalError("Failed to delete rows.");
+        }
+        return deleteCount + " row(s) deleted.";
+    }
+
+
 
 
     /**
@@ -160,89 +214,248 @@ public class QueryExecutor {
         }
         return "1 row inserted.";
     }
-
-    /**
-     * Execute an UPDATE statement and return result message.
-     */
-    public static String executeUpdate(UpdateStatement stmt) {
-        String tableName = stmt.getTableName();
-        String whereCol = stmt.getWhereColumn();
-        String whereVal = stmt.getWhereValue();
-        Map<String, String> assignments = stmt.getAssignments();
-        // Read current records
-        List<ColumnDefinition> schema = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
-        List<List<String>> records = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), tableName);
-        // Build column index map
-        Map<String, Integer> colIndexMap = new java.util.HashMap<>();
-        for (int i = 0; i < schema.size(); i++) {
-            colIndexMap.put(schema.get(i).getName(), i);
+    private static boolean evaluateCondition(Condition cond, List<String> record, List<ColumnDefinition> schema) {
+        if (cond == null) {
+            // 没有条件，默认返回true
+            return true;
         }
-        Integer whereIndex = null;
-        if (whereCol != null) {
-            whereIndex = colIndexMap.get(whereCol);
-        }
-        // Apply updates
-        int updateCount = 0;
-        for (List<String> record : records) {
-            if (whereIndex == null || (whereIndex < record.size() && record.get(whereIndex).equals(whereVal))) {
-                // Update指定列的值
-                for (Map.Entry<String, String> assign : assignments.entrySet()) {
-                    String colName = assign.getKey();
-                    String newValue = assign.getValue();
-                    int idx = colIndexMap.get(colName);
-                    if (idx >= record.size()) {
-                        while (record.size() <= idx) {
-                            record.add("");
-                        }
-                    }
-                    record.set(idx, newValue);
-                }
-                updateCount++;
+        if (cond instanceof SimpleCondition) {
+            return evaluateSimpleCondition((SimpleCondition) cond, record, schema);
+        } else if (cond instanceof CompoundCondition) {
+            CompoundCondition cc = (CompoundCondition) cond;
+            boolean leftResult = evaluateCondition(cc.getLeft(), record, schema);
+            boolean rightResult = evaluateCondition(cc.getRight(), record, schema);
+            if (cc.getOperator().equals("AND")) {
+                return leftResult && rightResult;
+            } else if (cc.getOperator().equals("OR")) {
+                return leftResult || rightResult;
             }
         }
-        // 写回所有记录
-        boolean success = StorageManager.writeTableRecords(DatabaseManager.getCurrentDatabase(), tableName, schema, records);
-        if (!success) {
-            return ErrorHandler.generalError("Failed to update rows.");
-        }
-        return updateCount + " row(s) updated.";
+        // 如果出现未知类型，或者 operator 非 AND/OR，默认 false
+        return false;
     }
 
     /**
-     * Execute a DELETE statement and return result message.
+     * 处理简单条件：attribute comparator value
      */
-    public static String executeDelete(DeleteStatement stmt) {
-        String tableName = stmt.getTableName();
-        String whereCol = stmt.getWhereColumn();
-        String whereVal = stmt.getWhereValue();
-        // Read current records
-        List<ColumnDefinition> schema = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
-        List<List<String>> records = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), tableName);
-        // Determine index for where column if any
-        int whereIndex = -1;
-        if (whereCol != null) {
-            for (int i = 0; i < schema.size(); i++) {
-                if (schema.get(i).getName().equals(whereCol)) {
-                    whereIndex = i;
+    private static boolean evaluateSimpleCondition(SimpleCondition cond, List<String> record, List<ColumnDefinition> schema) {
+        String attrName = cond.getAttribute();
+        String comparator = cond.getComparator();
+        String rawValue = cond.getValue();
+
+        // 去除引号
+        if (rawValue != null && rawValue.length() >= 2 &&
+                rawValue.startsWith("'") && rawValue.endsWith("'")) {
+            rawValue = rawValue.substring(1, rawValue.length() - 1);
+        }
+
+        // 找到属性在 schema 中的索引
+        int attrIndex = -1;
+        for (int i = 0; i < schema.size(); i++) {
+            if (schema.get(i).getName().equalsIgnoreCase(attrName)) {
+                attrIndex = i;
+                break;
+            }
+        }
+        if (attrIndex == -1) {
+            // 属性不存在，按需处理：要么抛出异常，要么直接返回 false
+            return false;
+        }
+        if (attrIndex >= record.size()) {
+            // 记录中没有这个列，认为不匹配
+            return false;
+        }
+
+        String recordValue = record.get(attrIndex);
+
+        // 下面根据 comparator 做简单的示例比较，可自行扩展
+        // 忽略大小写
+        switch (comparator) {
+            case "=":
+            case "==":
+                return recordValue.equalsIgnoreCase(rawValue);
+            case "!=":
+                return !recordValue.equalsIgnoreCase(rawValue);
+            case ">":
+                // 尝试转为数字比较，若失败则按字符串 compareTo
+                return compareAsNumberOrString(recordValue, rawValue) > 0;
+            case "<":
+                return compareAsNumberOrString(recordValue, rawValue) < 0;
+            case ">=":
+                return compareAsNumberOrString(recordValue, rawValue) >= 0;
+            case "<=":
+                return compareAsNumberOrString(recordValue, rawValue) <= 0;
+            case "LIKE":
+                // 简化版，忽略大小写
+                return recordValue.toLowerCase().contains(rawValue.toLowerCase());
+            default:
+                // 不支持的 comparator
+                return false;
+        }
+    }
+
+    /**
+     * 辅助方法：先尝试将字符串转为 Double，若无法转换则按字符串 compareTo
+     * 返回：正数 表示 recordValue > rawValue，0 表示相等，负数表示 recordValue < rawValue
+     */
+    private static int compareAsNumberOrString(String recordValue, String rawValue) {
+        try {
+            double rv = Double.parseDouble(recordValue);
+            double rv2 = Double.parseDouble(rawValue);
+            return Double.compare(rv, rv2);
+        } catch (NumberFormatException e) {
+            // 如果无法转为数字，则使用不区分大小写的字符串比较
+            return recordValue.compareToIgnoreCase(rawValue);
+        }
+    }
+
+    public static String executeJoin(JoinStatement stmt) {
+        String table1 = stmt.getTable1();
+        String table2 = stmt.getTable2();
+        String attr1 = stmt.getAttribute1();
+        String attr2 = stmt.getAttribute2();
+
+        // 读取两个表的 schema 和记录
+        List<ColumnDefinition> schema1 = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), table1);
+        List<ColumnDefinition> schema2 = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), table2);
+        List<List<String>> records1 = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), table1);
+        List<List<String>> records2 = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), table2);
+
+        // 找出 join 属性在各自表中的索引
+        int joinIndex1 = -1, joinIndex2 = -1;
+        for (int i = 0; i < schema1.size(); i++) {
+            if (schema1.get(i).getName().equalsIgnoreCase(attr1)) {
+                joinIndex1 = i;
+                break;
+            }
+        }
+        for (int i = 0; i < schema2.size(); i++) {
+            if (schema2.get(i).getName().equalsIgnoreCase(attr2)) {
+                joinIndex2 = i;
+                break;
+            }
+        }
+        if (joinIndex1 == -1 || joinIndex2 == -1) {
+            return ErrorHandler.syntaxError();
+        }
+
+        // 内连接：对 table1 中的每条记录，找出 table2 中 join 列匹配的记录
+        List<List<String>> joinResults = new ArrayList<>();
+        for (List<String> r1 : records1) {
+            for (List<String> r2 : records2) {
+                if (r1.size() > joinIndex1 && r2.size() > joinIndex2 &&
+                        r1.get(joinIndex1).equalsIgnoreCase(r2.get(joinIndex2))) {
+
+                    // 合并两行，但对于 table2 的列，如果其名称在 table1 中已存在，则跳过（避免重复）
+                    List<String> joined = new ArrayList<>();
+                    // 添加 table1 的所有列
+                    joined.addAll(r1);
+
+                    // 对于 table2，每个列检查是否在 table1 schema 中存在（忽略大小写）
+                    for (int j = 0; j < schema2.size(); j++) {
+                        String colName2 = schema2.get(j).getName();
+                        boolean duplicate = false;
+                        for (ColumnDefinition col1 : schema1) {
+                            if (col1.getName().equalsIgnoreCase(colName2)) {
+                                duplicate = true;
+                                break;
+                            }
+                        }
+                        if (!duplicate) {
+                            if (j < r2.size()) {
+                                joined.add(r2.get(j));
+                            } else {
+                                joined.add("");
+                            }
+                        }
+                    }
+                    joinResults.add(joined);
+                }
+            }
+        }
+
+        // 构造输出字符串
+        StringBuilder output = new StringBuilder();
+        // 构造 header：table1 的所有列，table2 中仅包含非重复的列
+        for (int i = 0; i < schema1.size(); i++) {
+            output.append(schema1.get(i).getName());
+            if (i < schema1.size() - 1) {
+                output.append(" | ");
+            }
+        }
+        for (int j = 0; j < schema2.size(); j++) {
+            String colName2 = schema2.get(j).getName();
+            boolean duplicate = false;
+            for (ColumnDefinition col1 : schema1) {
+                if (col1.getName().equalsIgnoreCase(colName2)) {
+                    duplicate = true;
                     break;
                 }
             }
-        }
-        // Filter out records matching where clause
-        Iterator<List<String>> iterator = records.iterator();
-        int deleteCount = 0;
-        while (iterator.hasNext()) {
-            List<String> record = iterator.next();
-            if (whereIndex == -1 || (whereIndex < record.size() && record.get(whereIndex).equals(whereVal))) {
-                iterator.remove();
-                deleteCount++;
+            if (!duplicate) {
+                output.append(" | ").append(colName2);
             }
         }
-        // 写回剩余记录
+        output.append("\n");
+
+        // 构造数据行
+        if (joinResults.isEmpty()) {
+            output.append("Empty set.");
+        } else {
+            for (List<String> row : joinResults) {
+                for (int i = 0; i < row.size(); i++) {
+                    output.append(row.get(i));
+                    if (i < row.size() - 1) {
+                        output.append(" | ");
+                    }
+                }
+                output.append("\n");
+            }
+        }
+        return output.toString().trim();
+    }
+
+    public static String executeAlter(AlterTableStatement stmt) {
+        String tableName = stmt.getTableName();
+        String alterationType = stmt.getAlterationType();
+        String attributeName = stmt.getAttributeName();
+
+        List<ColumnDefinition> schema = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
+        List<List<String>> records = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), tableName);
+
+        if (alterationType.equals("ADD")) {
+            // 添加新属性到 schema
+            schema.add(new ColumnDefinition(attributeName, "TEXT", false));
+            // 对每条记录，追加空字符串
+            for (List<String> record : records) {
+                record.add("");
+            }
+        } else if (alterationType.equals("DROP")) {
+            // 找到要删除的属性在 schema 中的索引
+            int dropIndex = -1;
+            for (int i = 0; i < schema.size(); i++) {
+                if (schema.get(i).getName().equalsIgnoreCase(attributeName)) {
+                    dropIndex = i;
+                    break;
+                }
+            }
+            if (dropIndex == -1) {
+                return ErrorHandler.columnNotFound(attributeName);
+            }
+            schema.remove(dropIndex);
+            // 对每条记录，删除对应位置的值
+            for (List<String> record : records) {
+                if (record.size() > dropIndex) {
+                    record.remove(dropIndex);
+                }
+            }
+        }
         boolean success = StorageManager.writeTableRecords(DatabaseManager.getCurrentDatabase(), tableName, schema, records);
         if (!success) {
-            return ErrorHandler.generalError("Failed to delete rows.");
+            return ErrorHandler.generalError("Failed to alter table.");
         }
-        return deleteCount + " row(s) deleted.";
+        return "Table altered successfully.";
     }
+
+
 }

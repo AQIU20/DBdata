@@ -1,20 +1,16 @@
 package edu.uob;
 
-import edu.uob.SQLStatement;
-
 import java.util.Map;
 
 public class UpdateStatement implements SQLStatement {
-    private final String tableName;
-    private final Map<String, String> assignments;
-    private final String whereColumn;
-    private final String whereValue;
+    private String tableName;
+    private Map<String, String> assignments;
+    private Condition condition;  // 可为 null
 
-    public UpdateStatement(String tableName, Map<String, String> assignments, String whereColumn, String whereValue) {
+    public UpdateStatement(String tableName, Map<String, String> assignments, Condition condition) {
         this.tableName = tableName;
         this.assignments = assignments;
-        this.whereColumn = whereColumn;
-        this.whereValue = whereValue;
+        this.condition = condition;
     }
 
     public String getTableName() {
@@ -25,11 +21,7 @@ public class UpdateStatement implements SQLStatement {
         return assignments;
     }
 
-    public String getWhereColumn() {
-        return whereColumn;
-    }
-
-    public String getWhereValue() {
-        return whereValue;
+    public Condition getCondition() {
+        return condition;
     }
 }
