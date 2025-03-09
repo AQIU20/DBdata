@@ -12,7 +12,7 @@ public class QueryExecutor {
     public static String executeSelect(SelectStatement stmt) {
         String tableName = stmt.getTableName();
         List<String> selectColumns = stmt.getColumns(); // null means all columns
-        Condition condition = stmt.getCondition();      // 新增：从 statement 中获取 Condition
+        Condition condition = stmt.getCondition();       // 新的 WHERE 条件对象
 
         // 读取表的 schema 和记录
         List<ColumnDefinition> schema = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), tableName);
@@ -25,7 +25,6 @@ public class QueryExecutor {
                 resultRecords.add(record);
             }
         }
-
         if (resultRecords.isEmpty()) {
             return "Empty set.";
         }
@@ -50,7 +49,7 @@ public class QueryExecutor {
 
         // 构造输出字符串
         StringBuilder output = new StringBuilder();
-        // 输出标题行（如果有多个列或是全列查询）
+        // 输出标题行
         if (colIndexes.size() > 1 || (selectColumns == null && colIndexes.size() == 1)) {
             for (int j = 0; j < colIndexes.size(); j++) {
                 output.append(schema.get(colIndexes.get(j)).getName());
@@ -60,7 +59,6 @@ public class QueryExecutor {
             }
             output.append("\n");
         }
-
         // 输出数据行
         for (int r = 0; r < resultRecords.size(); r++) {
             List<String> record = resultRecords.get(r);
@@ -216,22 +214,20 @@ public class QueryExecutor {
     }
     private static boolean evaluateCondition(Condition cond, List<String> record, List<ColumnDefinition> schema) {
         if (cond == null) {
-            // 没有条件，默认返回true
             return true;
         }
         if (cond instanceof SimpleCondition) {
             return evaluateSimpleCondition((SimpleCondition) cond, record, schema);
         } else if (cond instanceof CompoundCondition) {
             CompoundCondition cc = (CompoundCondition) cond;
-            boolean leftResult = evaluateCondition(cc.getLeft(), record, schema);
-            boolean rightResult = evaluateCondition(cc.getRight(), record, schema);
+            boolean left = evaluateCondition(cc.getLeft(), record, schema);
+            boolean right = evaluateCondition(cc.getRight(), record, schema);
             if (cc.getOperator().equals("AND")) {
-                return leftResult && rightResult;
+                return left && right;
             } else if (cc.getOperator().equals("OR")) {
-                return leftResult || rightResult;
+                return left || right;
             }
         }
-        // 如果出现未知类型，或者 operator 非 AND/OR，默认 false
         return false;
     }
 
@@ -243,13 +239,13 @@ public class QueryExecutor {
         String comparator = cond.getComparator();
         String rawValue = cond.getValue();
 
-        // 去除引号
+        // 去除条件值两侧的引号
         if (rawValue != null && rawValue.length() >= 2 &&
                 rawValue.startsWith("'") && rawValue.endsWith("'")) {
             rawValue = rawValue.substring(1, rawValue.length() - 1);
         }
 
-        // 找到属性在 schema 中的索引
+        // 查找属性在 schema 中的索引
         int attrIndex = -1;
         for (int i = 0; i < schema.size(); i++) {
             if (schema.get(i).getName().equalsIgnoreCase(attrName)) {
@@ -257,19 +253,17 @@ public class QueryExecutor {
                 break;
             }
         }
-        if (attrIndex == -1) {
-            // 属性不存在，按需处理：要么抛出异常，要么直接返回 false
+        if (attrIndex == -1 || attrIndex >= record.size()) {
             return false;
         }
-        if (attrIndex >= record.size()) {
-            // 记录中没有这个列，认为不匹配
-            return false;
-        }
-
         String recordValue = record.get(attrIndex);
+        // 同样去除 record 中可能存在的引号
+        if (recordValue != null && recordValue.length() >= 2 &&
+                recordValue.startsWith("'") && recordValue.endsWith("'")) {
+            recordValue = recordValue.substring(1, recordValue.length() - 1);
+        }
 
-        // 下面根据 comparator 做简单的示例比较，可自行扩展
-        // 忽略大小写
+        // 根据 comparator 执行比较（简单实现）
         switch (comparator) {
             case "=":
             case "==":
@@ -277,7 +271,6 @@ public class QueryExecutor {
             case "!=":
                 return !recordValue.equalsIgnoreCase(rawValue);
             case ">":
-                // 尝试转为数字比较，若失败则按字符串 compareTo
                 return compareAsNumberOrString(recordValue, rawValue) > 0;
             case "<":
                 return compareAsNumberOrString(recordValue, rawValue) < 0;
@@ -286,25 +279,21 @@ public class QueryExecutor {
             case "<=":
                 return compareAsNumberOrString(recordValue, rawValue) <= 0;
             case "LIKE":
-                // 简化版，忽略大小写
                 return recordValue.toLowerCase().contains(rawValue.toLowerCase());
             default:
-                // 不支持的 comparator
                 return false;
         }
     }
 
     /**
-     * 辅助方法：先尝试将字符串转为 Double，若无法转换则按字符串 compareTo
-     * 返回：正数 表示 recordValue > rawValue，0 表示相等，负数表示 recordValue < rawValue
+     * 辅助方法：尝试将两个字符串转换为数字比较，如果失败则使用不区分大小写的字符串比较。
      */
     private static int compareAsNumberOrString(String recordValue, String rawValue) {
         try {
-            double rv = Double.parseDouble(recordValue);
-            double rv2 = Double.parseDouble(rawValue);
-            return Double.compare(rv, rv2);
+            double d1 = Double.parseDouble(recordValue);
+            double d2 = Double.parseDouble(rawValue);
+            return Double.compare(d1, d2);
         } catch (NumberFormatException e) {
-            // 如果无法转为数字，则使用不区分大小写的字符串比较
             return recordValue.compareToIgnoreCase(rawValue);
         }
     }
