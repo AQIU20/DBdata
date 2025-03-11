@@ -77,7 +77,8 @@ public class Parser {
             if (token.equals(")")) {
                 break;
             }
-            if (token.isEmpty() || token.equals(",")) {
+            // 修改：除了空字符串和逗号，也跳过制表符
+            if (token.isEmpty() || token.equals(",") || token.equals("\t")) {
                 i++;
                 continue;
             }
@@ -170,6 +171,7 @@ public class Parser {
         }
         return new CreateTableStatement(tableName, columns);
     }
+
 
     private SQLStatement parseDrop(List<String> tokens) throws Exception {
         // DROP DATABASE <name> or DROP TABLE <name>

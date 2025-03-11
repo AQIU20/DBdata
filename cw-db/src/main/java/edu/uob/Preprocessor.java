@@ -16,7 +16,7 @@ public class Preprocessor {
         List<String> literals = extractStringLiterals(sql);
         String masked = maskLiterals(sql, literals);
 
-        // 保持原始替换顺序
+
         masked = masked.replaceAll("\\s+", " ")
                 .replace("(", " ( ")
                 .replace(")", " ) ")

@@ -162,8 +162,6 @@ public class QueryExecutor {
 
     /**
      * Execute an INSERT statement and return result message.
-     * 修改部分：在插入时自动在首列生成自增长 id，
-     * 用户仅需提供除 id 外的字段数据。
      */
     public static String executeInsert(InsertStatement stmt) {
         String tableName = stmt.getTableName();
@@ -180,6 +178,15 @@ public class QueryExecutor {
             System.err.println("[ERROR] Provided values: " + userValues.size());
             System.err.flush();
             return ErrorHandler.columnCountMismatch();
+        }
+
+        // 去除用户值中两侧的单引号（如果存在）
+        for (int k = 0; k < userValues.size(); k++) {
+            String val = userValues.get(k);
+            if (val.startsWith("'") && val.endsWith("'") && val.length() >= 2) {
+                val = val.substring(1, val.length() - 1);
+            }
+            userValues.set(k, val);
         }
 
         // 计算新的 id：遍历现有记录，取最大 id，然后新 id = max + 1；若无记录，则新 id 为 1
@@ -204,14 +211,16 @@ public class QueryExecutor {
         newRow.add(String.valueOf(newId));
         newRow.addAll(userValues);
 
-        // 将新行转换为以逗号分隔的字符串
-        String row = String.join(", ", newRow);
+        // 将新行转换为以制表符分隔的字符串
+        String row = String.join("\t", newRow);
         boolean success = StorageManager.insertRow(DatabaseManager.getCurrentDatabase(), tableName, row);
         if (!success) {
             return ErrorHandler.generalError("Failed to insert row.");
         }
         return "1 row inserted.";
     }
+
+
     private static boolean evaluateCondition(Condition cond, List<String> record, List<ColumnDefinition> schema) {
         if (cond == null) {
             return true;

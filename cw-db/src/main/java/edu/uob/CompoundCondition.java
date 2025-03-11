@@ -2,7 +2,7 @@ package edu.uob;
 
 public class CompoundCondition implements Condition {
     private Condition left;
-    private String operator; // "AND" 或 "OR"
+    private String operator;
     private Condition right;
 
     public CompoundCondition(Condition left, String operator, Condition right) {

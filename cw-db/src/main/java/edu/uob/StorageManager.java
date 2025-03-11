@@ -49,7 +49,7 @@ public class StorageManager {
     }
 
     /**
-     * 修改后：在创建表时自动在 schema 前添加 id 列，写入的 schema 为 "id, " + 原 schema。
+     * 修改后：在创建表时自动在 schema 前添加 id 列，写入的 schema 为 "id\t" + (将逗号替换为制表符的原 schema)。
      * 注意：这里只写入列名，后续解析时会默认给 id 列赋予 INT 类型和主键属性。
      */
     public static boolean createTable(String dbName, String tableName, String schemaLine) {
@@ -58,8 +58,10 @@ public class StorageManager {
         if (tableFile.exists()) {
             return false;
         }
-        // 自动在 schema 前加上 id 列（仅列名）
-        String newSchemaLine = "id, " + schemaLine;
+        // 将 schemaLine 中的逗号及其周围的空白替换为单个制表符
+        schemaLine = schemaLine.replaceAll("\\s*,\\s*", "\t");
+        // 在 schema 前加上 "id" 列，使用制表符分隔
+        String newSchemaLine = "id\t" + schemaLine;
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(tableFile))) {
             writer.write(newSchemaLine);
             writer.newLine();
@@ -68,6 +70,7 @@ public class StorageManager {
         }
         return true;
     }
+
 
     public static boolean deleteTable(String dbName, String tableName) {
         if (dbName == null) return false;
@@ -84,6 +87,7 @@ public class StorageManager {
      * - 如果列名为 "id"，默认类型为 INT 且标记为主键；
      * - 否则默认类型为 TEXT，非主键。
      * 如果列定义包含多个单词，则按原有逻辑解析。
+     * 使用制表符分隔各列定义。
      */
     public static List<ColumnDefinition> readTableSchema(String dbName, String tableName) {
         File tableFile = new File(new File(BASE_PATH, dbName), tableName + ".txt");
@@ -96,8 +100,8 @@ public class StorageManager {
                 return null;
             }
             List<ColumnDefinition> columns = new ArrayList<>();
-            // 以逗号分割各列定义
-            String[] colDefs = schemaLine.split(",");
+            // 使用制表符拆分
+            String[] colDefs = schemaLine.split("\t");
             for (String colDef : colDefs) {
                 colDef = colDef.trim();
                 if (colDef.isEmpty()) continue;
@@ -152,8 +156,8 @@ public class StorageManager {
             // 跳过 schema 行
             String line = reader.readLine();
             while ((line = reader.readLine()) != null) {
-                // 每行记录以逗号分隔
-                String[] parts = line.split(",");
+                // 每行记录以制表符分隔
+                String[] parts = line.split("\t");
                 List<String> record = new ArrayList<>();
                 for (String part : parts) {
                     record.add(part.trim());
@@ -192,21 +196,21 @@ public class StorageManager {
             return false;
         }
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(tableFile))) {
-            // 重构 schema 行
+            // 重构 schema 行，使用制表符分隔
             StringBuilder schemaLine = new StringBuilder();
             for (int i = 0; i < schema.size(); i++) {
                 ColumnDefinition col = schema.get(i);
                 // 这里只写入列名，如果需要写入类型信息可以自行调整
                 schemaLine.append(col.getName());
                 if (i < schema.size() - 1) {
-                    schemaLine.append(", ");
+                    schemaLine.append("\t");
                 }
             }
             writer.write(schemaLine.toString());
             writer.newLine();
-            // 写入每条记录
+            // 写入每条记录，使用制表符拼接
             for (List<String> record : records) {
-                writer.write(String.join(", ", record));
+                writer.write(String.join("\t", record));
                 writer.newLine();
             }
         } catch (IOException e) {

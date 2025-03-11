@@ -46,22 +46,22 @@ public class DBServer {
      */
     public String handleCommand(String command) {
         try {
-            // 1. 预处理命令
+            // Preprocessor
             String formatted = new Preprocessor().preprocess(command);
 
-            // 2. 词法分析（Tokenize）
+            // 词法分析 Tokenize
             List<String> tokens = new Tokenizer().tokenize(formatted);
             if (tokens.isEmpty()) {
                 return "";
             }
 
-            // 3. 语法解析（Parse）
+            // 语法解析 Parse
             SQLStatement statement = new Parser().parse(tokens);
 
-            // 4. 语义分析（Semantic Analysis）
+            // 语义分析 Semantic Analysis
             new SemanticAnalyzer().validate(statement);
 
-            // 5. 执行对应的数据库命令
+            // 执行对应的数据库命令
             String result = "";
             if (statement instanceof CreateDatabaseStatement) {
                 result = DatabaseManager.createDatabase(((CreateDatabaseStatement) statement).getDatabaseName());
@@ -90,18 +90,18 @@ public class DBServer {
                 result = ErrorHandler.syntaxError();
             }
 
-            // 如果没有错误，则在返回结果前加上 [OK] 标签
+            // Table OK
             if (!result.contains("[ERROR]")) {
                 result = "[OK] " + result;
             }
             return result;
         } catch (Exception e) {
-            // 修改处：返回错误信息时添加 [ERROR] 标签
+            // Table ERROR
             return "[ERROR] " + e.getMessage();
         }
     }
 
-    //  === Methods below handle networking aspects of the project - you will not need to change these ! ===
+    // Methods below handle networking aspects of the project - you will not need to change these ! ===
 
     public void blockingListenOn(int portNumber) throws IOException {
         try (ServerSocket s = new ServerSocket(portNumber)) {

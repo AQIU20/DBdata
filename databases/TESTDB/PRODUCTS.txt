@@ -1,2 +1,0 @@
-id, NAME, PRICE, CATEGORY
-1, Laptop, 1500, 

@@ -11,7 +11,7 @@ public class DatabaseManager {
     }
 
     /**
-     * Create a new database (directory).
+     * Create a new database directory.
      */
     public static String createDatabase(String name) {
         boolean created = edu.uob.StorageManager.createDatabase(name);
@@ -22,7 +22,7 @@ public class DatabaseManager {
     }
 
     /**
-     * Drop (delete) an existing database.
+     * Drop delete an existing database.
      */
     public static String dropDatabase(String name) {
         boolean deleted = edu.uob.StorageManager.deleteDatabase(name);
@@ -37,7 +37,7 @@ public class DatabaseManager {
     }
 
     /**
-     * Use (switch to) a database as current.
+     * Use switch to a database as current.
      */
     public static String useDatabase(String name) {
         if (!edu.uob.StorageManager.databaseExists(name)) {
