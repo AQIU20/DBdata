@@ -4,9 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Tokenizer {
-    /**
-     * Tokenize a preprocessed SQL statement into a list of tokens.
-     */
+    //Tokenize into a list of tokens.
+
     public List<String> tokenize(String sql) {
         List<String> tokens = new ArrayList<>();
         if (sql == null) {
@@ -20,19 +19,19 @@ public class Tokenizer {
             if (token.isEmpty()) {
                 continue;
             }
-            // 如果 token 以单引号开始，处理字符串字面量
+            // begin with '
             if (token.startsWith("'")) {
                 stringToken = new StringBuilder();
-                token = token.substring(1); // 去掉前导引号
+                token = token.substring(1);
                 if (token.endsWith("'")) {
-                    token = token.substring(0, token.length() - 1); // 去掉尾部引号
+                    token = token.substring(0, token.length() - 1);
                     stringToken.append(token);
-                    // 保留原始大小写，并加上单引号以便后续处理
+                    // raw word + '
                     tokens.add("'" + stringToken.toString() + "'");
                     stringToken = null;
                 } else {
                     stringToken.append(token);
-                    // 继续合并后续 token，直到遇到结束引号
+                    // merge token
                     while (i + 1 < parts.length) {
                         i++;
                         String nextToken = parts[i];
@@ -45,7 +44,7 @@ public class Tokenizer {
                             stringToken.append(" ").append(nextToken);
                         }
                     }
-                    if (stringToken != null) { // 如果结束引号缺失，也将其加入
+                    if (stringToken != null) {
                         tokens.add("'" + stringToken.toString() + "'");
                         stringToken = null;
                     }
@@ -55,7 +54,6 @@ public class Tokenizer {
             }
         }
 
-        // 合并连续的比较操作符
         List<String> combinedTokens = new ArrayList<>();
         for (int i = 0; i < tokens.size(); i++) {
             String curr = tokens.get(i);
@@ -85,7 +83,7 @@ public class Tokenizer {
             combinedTokens.add(curr);
         }
 
-        // 去除每个 token 尾部的分号
+
         List<String> finalTokens = new ArrayList<>();
         for (String t : combinedTokens) {
             if (t.endsWith(";")) {

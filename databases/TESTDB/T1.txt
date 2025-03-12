@@ -1,2 +1,0 @@
-id	NAME	AGE 
-1	Bob	25
