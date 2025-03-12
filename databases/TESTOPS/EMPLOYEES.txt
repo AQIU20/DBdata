@@ -1,6 +1,0 @@
-id, NAME , SALARY , DEPARTMENT 
-1, Alice, 5000, HR
-2, Bob, 6000, IT
-3, Charlie, 7000, IT
-4, David, 5500, Finance
-5, Eve, 5000, HR

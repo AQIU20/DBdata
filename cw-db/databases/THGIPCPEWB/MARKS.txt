@@ -1,2 +1,0 @@
-id	NAME	MARK	PASS 
-1	Simon	65	TRUE
