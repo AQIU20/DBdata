@@ -29,7 +29,7 @@ public class TableManager {
         if (!created) {
             return ErrorHandler.tableAlreadyExists(tableName);
         }
-        return "Table " + tableName + " created.";
+        return "";
     }
 
     /**
@@ -40,7 +40,7 @@ public class TableManager {
         if (!deleted) {
             return ErrorHandler.tableNotFound(tableName);
         }
-        return "Table " + tableName + " deleted.";
+        return "";
     }
 }
 

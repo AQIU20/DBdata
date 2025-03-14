@@ -10,20 +10,18 @@ public class DatabaseManager {
         return currentDatabase;
     }
 
-    /**
-     * Create a new database directory.
-     */
+    //Create a new database directory.
+
     public static String createDatabase(String name) {
         boolean created = edu.uob.StorageManager.createDatabase(name);
         if (!created) {
             return edu.uob.ErrorHandler.databaseAlreadyExists(name);
         }
-        return "Database " + name + " created.";
+        return "";
     }
 
-    /**
-     * Drop delete an existing database.
-     */
+    //Drop delete an existing database.
+
     public static String dropDatabase(String name) {
         boolean deleted = edu.uob.StorageManager.deleteDatabase(name);
         if (!deleted) {
@@ -33,17 +31,16 @@ public class DatabaseManager {
         if (name.equalsIgnoreCase(currentDatabase)) {
             currentDatabase = null;
         }
-        return "Database " + name + " deleted.";
+        return "";
     }
 
-    /**
-     * Use switch to a database as current.
-     */
+    //Use switch to a database as current.
+
     public static String useDatabase(String name) {
         if (!edu.uob.StorageManager.databaseExists(name)) {
             return edu.uob.ErrorHandler.databaseNotFound(name);
         }
         currentDatabase = name;
-        return "Using database " + name + ".";
+        return "";
     }
 }

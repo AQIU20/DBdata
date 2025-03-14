@@ -99,7 +99,7 @@ public class QueryExecutor {
         if (!success) {
             return ErrorHandler.generalError("Failed to update rows.");
         }
-        return updateCount + " row(s) updated.";
+        return "";
     }
 
     private static Map<String, Integer> buildColumnIndexMap(List<ColumnDefinition> schema) {
@@ -154,7 +154,7 @@ public class QueryExecutor {
         if (!success) {
             return ErrorHandler.generalError("Failed to delete rows.");
         }
-        return deleteCount + " row(s) deleted.";
+        return "";
     }
 
     private static int filterRecords(List<List<String>> records, Condition condition, List<ColumnDefinition> schema) {
@@ -191,7 +191,7 @@ public class QueryExecutor {
         List<String> newRow = buildNewRow(newId, userValues);
         boolean success = StorageManager.insertRow(DatabaseManager.getCurrentDatabase(), tableName, String.join("\t", newRow));
 
-        return success ? "1 row inserted." : ErrorHandler.generalError("Failed to insert row.");
+        return success ? ""  : ErrorHandler.generalError("Failed to insert row.");
     }
 
     private static void logColumnMismatch(int expected, int actual) {
@@ -317,22 +317,36 @@ public class QueryExecutor {
     public static String executeJoin(JoinStatement stmt) {
         String table1 = stmt.getTable1();
         String table2 = stmt.getTable2();
-        String attr1 = stmt.getAttribute1();
-        String attr2 = stmt.getAttribute2();
+        String matchAttr1 = stmt.getAttribute1();
+        String matchAttr2 = stmt.getAttribute2();
 
+        // 读取表结构和数据
         List<ColumnDefinition> schema1 = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), table1);
         List<ColumnDefinition> schema2 = StorageManager.readTableSchema(DatabaseManager.getCurrentDatabase(), table2);
-        List<List<String>> records1 = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), table1);
-        List<List<String>> records2 = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), table2);
+        List<List<String>> data1 = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), table1);
+        List<List<String>> data2 = StorageManager.readTableRecords(DatabaseManager.getCurrentDatabase(), table2);
 
-        int idx1 = findAttributeIndex(attr1, schema1);
-        int idx2 = findAttributeIndex(attr2, schema2);
-        if (idx1 == -1 || idx2 == -1) {
-            return ErrorHandler.syntaxError();
+        // 查找匹配列索引
+        int matchIdx1 = findAttributeIndex(matchAttr1, schema1);
+        int matchIdx2 = findAttributeIndex(matchAttr2, schema2);
+
+        // 执行JOIN核心逻辑
+        List<List<String>> joinedData = new ArrayList<>();
+        int newId = 1;
+        for (List<String> row1 : data1) {
+            for (List<String> row2 : data2) {
+                if (isJoinMatch(row1, matchIdx1, row2, matchIdx2)) {
+                    // 生成新行并添加ID
+                    List<String> newRow = buildJoinedRow(table1, table2, row1, row2,
+                            schema1, schema2, matchIdx1, matchIdx2);
+                    newRow.add(0, String.valueOf(newId++));
+                    joinedData.add(newRow);
+                }
+            }
         }
 
-        List<List<String>> results = performJoin(records1, records2, idx1, idx2, schema1, schema2);
-        return buildJoinOutput(schema1, schema2, results);
+        // 构建输出
+        return buildJoinOutput(table1, table2, schema1, schema2, matchIdx1, matchIdx2, joinedData);
     }
 
     private static List<List<String>> performJoin(List<List<String>> data1, List<List<String>> data2,
@@ -342,6 +356,7 @@ public class QueryExecutor {
         for (List<String> row1 : data1) {
             for (List<String> row2 : data2) {
                 if (isJoinMatch(row1, idx1, row2, idx2)) {
+                    // 合并所有列（包括重复列）
                     results.add(mergeRows(row1, row2, schema1, schema2));
                 }
             }
@@ -349,22 +364,20 @@ public class QueryExecutor {
         return results;
     }
 
-    private static boolean isJoinMatch(List<String> row1, int idx1, List<String> row2, int idx2) {
-        return row1.size() > idx1 && row2.size() > idx2 &&
-                row1.get(idx1).equalsIgnoreCase(row2.get(idx2));
+    private static boolean isJoinMatch(List<String> row1, int idx1,
+                                       List<String> row2, int idx2) {
+        if (row1.size() <= idx1 || row2.size() <= idx2) return false;
+        return row1.get(idx1).equals(row2.get(idx2));
     }
 
     private static List<String> mergeRows(List<String> row1, List<String> row2,
                                           List<ColumnDefinition> schema1, List<ColumnDefinition> schema2) {
         List<String> merged = new ArrayList<>(row1);
-        for (int i = 0; i < schema2.size(); i++) {
-            String colName = schema2.get(i).getName();
-            if (!isColumnExist(colName, schema1)) {
-                merged.add(i < row2.size() ? row2.get(i) : "");
-            }
-        }
+        // 添加第二个表的所有列
+        merged.addAll(row2);
         return merged;
     }
+
 
     private static boolean isColumnExist(String name, List<ColumnDefinition> schema) {
         for (ColumnDefinition col : schema) {
@@ -375,40 +388,79 @@ public class QueryExecutor {
         return false;
     }
 
-    private static String buildJoinOutput(List<ColumnDefinition> schema1, List<ColumnDefinition> schema2, List<List<String>> data) {
-        StringBuilder output = new StringBuilder();
-        appendJoinHeader(schema1, schema2, output);
-        if (data.isEmpty()) {
-            output.append("Empty set.");
-        } else {
-            appendJoinData(data, output);
+    private static List<String> buildJoinedRow(String table1, String table2,
+                                               List<String> row1, List<String> row2,
+                                               List<ColumnDefinition> schema1,
+                                               List<ColumnDefinition> schema2,
+                                               int excludeIdx1, int excludeIdx2) {
+        List<String> newRow = new ArrayList<>();
+
+        // 添加表1字段（排除ID和匹配列）
+        for (int i=0; i<schema1.size(); i++) {
+            if (i != 0 && i != excludeIdx1) { // 跳过ID列和匹配列
+                newRow.add(row1.get(i));
+            }
         }
+
+        // 添加表2字段（排除ID和匹配列）
+        for (int i=0; i<schema2.size(); i++) {
+            if (i != 0 && i != excludeIdx2) { // 跳过ID列和匹配列
+                newRow.add(row2.get(i));
+            }
+        }
+
+        return newRow;
+    }
+
+    private static String buildJoinOutput(String table1, String table2,
+                                          List<ColumnDefinition> schema1,
+                                          List<ColumnDefinition> schema2,
+                                          int excludeIdx1, int excludeIdx2,
+                                          List<List<String>> data) {
+        StringBuilder output = new StringBuilder("id | ");
+
+        // 生成表头
+        List<String> headers = new ArrayList<>();
+        for (int i=0; i<schema1.size(); i++) {
+            if (i != 0 && i != excludeIdx1) {
+                headers.add(table1 + "." + schema1.get(i).getName());
+            }
+        }
+        for (int i=0; i<schema2.size(); i++) {
+            if (i != 0 && i != excludeIdx2) {
+                headers.add(table2 + "." + schema2.get(i).getName());
+            }
+        }
+        output.append(String.join(" | ", headers)).append("\n");
+
+        // 添加数据行
+        for (List<String> row : data) {
+            output.append(String.join(" | ", row)).append("\n");
+        }
+
         return output.toString().trim();
     }
 
-    private static void appendJoinHeader(List<ColumnDefinition> schema1, List<ColumnDefinition> schema2, StringBuilder output) {
+    private static void appendJoinHeader(String table1, String table2,
+                                         List<ColumnDefinition> schema1, List<ColumnDefinition> schema2,
+                                         StringBuilder output) {
+        List<String> headers = new ArrayList<>();
+        // 添加第一个表的列名，带表名前缀
         for (ColumnDefinition col : schema1) {
-            output.append(col.getName()).append(" | ");
+            headers.add(table1 + "." + col.getName());
         }
-        for (int i = 0; i < schema2.size(); i++) {
-            ColumnDefinition col = schema2.get(i);
-            if (!isColumnExist(col.getName(), schema1)) {
-                output.append(col.getName());
-                if (i < schema2.size() - 1) output.append(" | ");
-            }
+        // 添加第二个表的列名，带表名前缀
+        for (ColumnDefinition col : schema2) {
+            headers.add(table2 + "." + col.getName());
         }
+        output.append(String.join(" | ", headers));
         output.append("\n");
     }
 
     private static void appendJoinData(List<List<String>> data, StringBuilder output) {
         for (int i = 0; i < data.size(); i++) {
             List<String> row = data.get(i);
-            for (int j = 0; j < row.size(); j++) {
-                output.append(row.get(j));
-                if (j < row.size() - 1) {
-                    output.append(" | ");
-                }
-            }
+            output.append(String.join(" | ", row));
             if (i < data.size() - 1) {
                 output.append("\n");
             }
@@ -430,7 +482,7 @@ public class QueryExecutor {
         }
 
         boolean success = StorageManager.writeTableRecords(DatabaseManager.getCurrentDatabase(), tableName, schema, records);
-        return success ? "Table altered successfully." : ErrorHandler.generalError("Failed to alter table.");
+        return success ? "" : ErrorHandler.generalError("Failed to alter table.");
     }
 
     private static void handleAddColumn(List<ColumnDefinition> schema, List<List<String>> records, String colName) {

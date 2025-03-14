@@ -9,7 +9,6 @@ public class SemanticAnalyzer {
     /**
      * 语义分析
      * Validate the SQL statement in the context of current database state.
-     * Throws an exception with appropriate error message if a semantic rule is violated.
      */
     public void validate(edu.uob.SQLStatement statement) throws Exception {
         if (statement instanceof CreateDatabaseStatement) {

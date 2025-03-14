@@ -310,10 +310,33 @@ public class Parser {
     }
 
     private Condition parseCondition(List<String> tokens, int start, int end) throws Exception {
-        if (tokens.get(start).equals("(") && tokens.get(end - 1).equals(")")) {
-            start++;
-            end--;
+        // 如果整个条件被一对匹配的括号包围，则移除外层括号
+        if (tokens.get(start).equals("(")) {
+            int count = 0;
+            boolean fullyEnclosed = false;
+            for (int i = start; i < end; i++) {
+                String token = tokens.get(i);
+                if (token.equals("(")) {
+                    count++;
+                } else if (token.equals(")")) {
+                    count--;
+                }
+                // 如果在中间提前归零，说明不是完全包围
+                if (count == 0 && i < end - 1) {
+                    fullyEnclosed = false;
+                    break;
+                }
+                if (count == 0 && i == end - 1) {
+                    fullyEnclosed = true;
+                }
+            }
+            if (fullyEnclosed) {
+                start++;
+                end--;
+            }
         }
+
+        // 在顶层查找布尔运算符（AND 或 OR），注意仅在不在括号内的部分查找
         int level = 0;
         int opIndex = -1;
         String boolOp = null;
@@ -330,10 +353,12 @@ public class Parser {
             }
         }
         if (opIndex != -1) {
+            // 复合条件：分解为左右子条件
             Condition left = parseCondition(tokens, start, opIndex);
             Condition right = parseCondition(tokens, opIndex + 1, end);
             return new CompoundCondition(left, boolOp, right);
         } else {
+            // 简单条件，应该恰好包含 3 个 token: [AttributeName] <Comparator> [Value]
             if (end - start != 3) {
                 throw new Exception(ErrorHandler.syntaxError());
             }
@@ -346,6 +371,7 @@ public class Parser {
             return new SimpleCondition(attribute, comparator, value);
         }
     }
+
 
     private boolean isValidComparator(String op) {
         return op.equals("=") || op.equals("==") || op.equals(">") || op.equals("<") ||
